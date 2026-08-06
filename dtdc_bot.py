@@ -23,6 +23,8 @@ Run:
 
 import logging
 import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import quote
 
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
@@ -137,7 +139,34 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+class _HealthCheckHandler(BaseHTTPRequestHandler):
+    """Minimal HTTP handler so Render's free Web Service sees an open port
+    and considers the deploy healthy. The actual bot logic runs separately
+    via Telegram polling, not through this server."""
+
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"DTDC Telegram bot is running.")
+
+    def log_message(self, format, *args):
+        pass  # silence default request logging
+
+
+def _run_health_server() -> None:
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), _HealthCheckHandler)
+    logger.info(f"Health check server listening on port {port}")
+    server.serve_forever()
+
+
 def main() -> None:
+    # Start the dummy web server in a background thread so Render's free
+    # Web Service tier sees an open port (required for it to mark the
+    # deploy healthy). This does not affect the bot's Telegram behavior.
+    threading.Thread(target=_run_health_server, daemon=True).start()
+
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError(
