@@ -11,32 +11,43 @@ do that part. That's intentional: it keeps a human in the loop, which is
 what DTDC's captcha is there to require. Everything else (typing the
 AWB, cropping the captcha image, clicking submit) is automated.
 
-## Setup
+Runs as a **Docker** deploy on Render, using Playwright's official base
+image (Chromium + all system libraries pre-installed) — this avoids the
+apt/sudo permission issues that break `playwright install --with-deps`
+on Render's standard Python build environment.
+
+## Local setup (optional, for testing before deploying)
 
 ### 1. Create a Telegram bot
 - Message [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token
 
-### 2. Install dependencies
+### 2. Build and run the Docker image locally
 ```bash
-pip install -r requirements.txt
-playwright install chromium --with-deps
-```
-(The `--with-deps` flag installs system libraries Chromium needs — on
-Render this happens automatically during the build step below.)
-
-### 3. Set your token
-```bash
-export TELEGRAM_BOT_TOKEN="123456:ABC-your-token-here"
+docker build -t dtdc-bot .
+docker run -e TELEGRAM_BOT_TOKEN="your-token-here" -p 10000:10000 dtdc-bot
 ```
 
-### 4. Run
-```bash
-python dtdc_bot.py
-```
+### 3. Use it
+In Telegram: `/track` → send your AWB → bot sends the captcha image →
+type the answer → bot sends back a screenshot of your result.
 
-### 5. Use it
-`/track` → send your AWB → bot sends you the captcha image → type the
-answer → bot sends back a screenshot of your tracking result.
+## Deploying on Render (Docker)
+
+1. Push all 4 files to your GitHub repo: `dtdc_bot.py`, `requirements.txt`,
+   `Dockerfile`, `README.md`
+2. On Render, go to your existing service → **Settings**
+3. Under **Build & Deploy**, change **Environment** from "Python" to
+   **Docker** (Render auto-detects the `Dockerfile` in your repo root)
+4. Under **Environment**, make sure `TELEGRAM_BOT_TOKEN` is still set
+   (it should carry over, but double-check)
+5. Save → Render will rebuild using the Dockerfile this time
+6. Watch **Logs** — you want to see `Bot starting...` with no errors
+
+If Render doesn't offer an "Environment" toggle on your existing
+service, it's sometimes simpler to delete the old service and create a
+fresh one: **New + → Web Service** → connect your repo → Render will
+detect the `Dockerfile` automatically and use it without you needing to
+set a Build/Start command manually.
 
 ## Commands
 - `/track` — start a lookup
@@ -65,30 +76,14 @@ robots.txt blocks that). If a selector doesn't match:
        ...
    ],
    ```
-6. Redeploy
-
-## Deploying on Render
-
-Chromium is memory-heavy. Render's **free** Web Service tier (512 MB
-RAM) may be too tight to run headless Chromium reliably — expect
-possible crashes or slow page loads. If you hit that, upgrading to the
-**Starter** instance ($7/mo, 512 MB→ more headroom depending on plan) or
-a small VPS will be much more stable. Steps either way:
-
-1. Push these files to a GitHub repo
-2. Render dashboard → **New + → Web Service** → connect the repo
-3. Build command: `pip install -r requirements.txt && playwright install chromium --with-deps`
-4. Start command: `python dtdc_bot.py`
-5. Add environment variable: `TELEGRAM_BOT_TOKEN`
-6. Deploy — check Logs for `Bot starting...`
-
-On the free tier, the service also sleeps after ~15 min idle, so the
-first message after a quiet period takes 30–60s to wake up.
+6. Commit and push — Render will rebuild automatically
 
 ## Limitations to expect
 - If DTDC changes their page layout, selectors will need updating again
 - Captchas can expire after a minute or two — if submission fails, just
   `/track` again for a fresh one
 - Multiple people using the bot at once means multiple Chromium browser
-  instances running simultaneously, which needs more RAM than a single
-  free-tier instance may have
+  instances running simultaneously — fine for personal use, but heavier
+  usage would need more RAM than Render's free tier gives
+- The free tier still sleeps after ~15 min idle, so the first message
+  after a quiet period takes 30–60s to wake up
